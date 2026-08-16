@@ -12,6 +12,7 @@
 - OAuth protected-resource and authorization-server discovery per RFC 9728/RFC 8414.
 - Authorization Code only; PKCE S256 is mandatory; redirect URIs require HTTPS except loopback clients.
 - Authorization form submissions use `303 See Other` to complete the callback as a GET. The form disables itself while credentials are verified to prevent accidental replay of its one-time authorization request.
+- The authorization page limits `form-action` to its own submission endpoint and the exact registered callback origin, including loopback origins with ephemeral ports.
 - One-time authorization request and code identifiers enforced in Redis.
 - A256GCM encrypted opaque tokens with strict issuer, audience, type and expiry checks.
 - Least-privilege scopes; payout actions require the separate payout key.

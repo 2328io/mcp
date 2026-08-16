@@ -44,8 +44,9 @@ function redirectWith(
   return Response.redirect(url, status);
 }
 
-function authorizationPage(requestToken: string, scopes: readonly string[], error?: string): Response {
+function authorizationPage(requestToken: string, scopes: readonly string[], redirectUri: string, error?: string): Response {
   const nonce = randomBytes(18).toString("base64");
+  const callbackOrigin = new URL(redirectUri).origin;
   const moneyMoving = new Set(["payout:create", "convert:execute"]);
   const scopeItems = scopes.map((scope) => `<li class="permission${moneyMoving.has(scope) ? " permission--money" : ""}"><span class="permission-mark" aria-hidden="true">✓</span><span>${Bun.escapeHTML(SCOPE_DESCRIPTIONS[scope] ?? scope)}</span></li>`).join("");
   const errorBlock = error ? `<div class="error" role="alert">${Bun.escapeHTML(error)}</div>` : "";
@@ -62,7 +63,7 @@ function authorizationPage(requestToken: string, scopes: readonly string[], erro
 </style></head>
 <body><main class="shell"><a class="brand" href="https://2328.io">${BRAND_LOGO}</a><section class="card"><div class="card-accent"></div><div class="content"><h1>Подключить 2328</h1><p class="lead">Подтвердите доступ к проекту для MCP-клиента.</p>${errorBlock}
 <div class="section"><p class="section-title">Доступ</p><ul class="permissions">${scopeItems}</ul>${moneyWarning}</div>
-<form class="form" method="post" autocomplete="off"><input type="hidden" name="request_token" value="${Bun.escapeHTML(requestToken)}">
+<form class="form" method="post" action="/oauth/authorize" autocomplete="off"><input type="hidden" name="request_token" value="${Bun.escapeHTML(requestToken)}">
 <div class="field"><label for="project_id">Project UUID</label><input id="project_id" name="project_id" required minlength="8" maxlength="128" spellcheck="false" autocapitalize="none" autocomplete="off"></div>
 <div class="field"><label for="api_key">API key</label><input id="api_key" name="api_key" type="password" required minlength="16" maxlength="512" autocomplete="off"></div>
 ${payoutField}
@@ -73,7 +74,7 @@ ${payoutField}
     status: error ? 400 : 200,
     headers: {
       ...SECURITY_HEADERS,
-      "content-security-policy": `${SECURITY_HEADERS["content-security-policy"]}; script-src 'nonce-${nonce}'`,
+      "content-security-policy": `${SECURITY_HEADERS["content-security-policy"].replace("form-action 'self'", `form-action 'self' ${callbackOrigin}`)}; script-src 'nonce-${nonce}'`,
       "content-type": "text/html; charset=utf-8",
     },
   });
@@ -164,7 +165,7 @@ export class OAuthHandler {
       if (requestedResource && requestedResource !== this.resource) return redirectWith(redirectUri, { error: "invalid_target", state });
       const scopes = parseScopes(url.searchParams.get("scope") ?? "wallet:read");
       const requestToken = await this.tokens.issueAuthorizationRequest({ clientId, redirectUri, codeChallenge, scope: scopes.join(" "), ...(state ? { state } : {}) });
-      return authorizationPage(requestToken, scopes);
+      return authorizationPage(requestToken, scopes, redirectUri);
     } catch {
       return oauthError("invalid_request", "Invalid authorization request");
     }
@@ -183,12 +184,12 @@ export class OAuthHandler {
       const apiKey = form.get("api_key") ?? "";
       const payoutApiKeyValue = form.get("payout_api_key")?.trim() ?? "";
       if (projectId.length < 8 || projectId.length > 128 || apiKey.length < 16 || apiKey.length > 512 || payoutApiKeyValue.length > 512) {
-        return authorizationPage(form.get("request_token") ?? "", parseScopes(authorization.scope), "Проверьте Project UUID и ключи.");
+        return authorizationPage(form.get("request_token") ?? "", parseScopes(authorization.scope), authorization.redirectUri, "Проверьте Project UUID и ключи.");
       }
       const scopes = parseScopes(authorization.scope);
       const needsPayoutKey = scopes.some((scope) => scope.startsWith("payout:"));
       if (needsPayoutKey && payoutApiKeyValue.length < 16) {
-        return authorizationPage(form.get("request_token") ?? "", scopes, "Для payout scopes нужен отдельный Payout API key.");
+        return authorizationPage(form.get("request_token") ?? "", scopes, authorization.redirectUri, "Для payout scopes нужен отдельный Payout API key.");
       }
       const credentials = { projectId, apiKey, ...(needsPayoutKey ? { payoutApiKey: payoutApiKeyValue } : {}) };
       const api = new Payments2328Client(this.config, credentials, this.logger, this.fetchImplementation);

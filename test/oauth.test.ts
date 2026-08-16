@@ -57,7 +57,10 @@ describe("OAuth Authorization Code with PKCE", () => {
     expect(page).toContain("Подключаем…");
     const nonce = /<script nonce="([^"]+)">/u.exec(page)?.[1];
     if (!nonce) throw new Error("Authorization page CSP nonce is missing");
-    expect(consent.headers.get("content-security-policy")).toContain(`script-src 'nonce-${nonce}'`);
+    const contentSecurityPolicy = consent.headers.get("content-security-policy");
+    expect(contentSecurityPolicy).toContain("form-action 'self' https://client.example");
+    expect(contentSecurityPolicy).toContain(`script-src 'nonce-${nonce}'`);
+    expect(page).toContain('action="/oauth/authorize"');
     const requestToken = /name="request_token" value="([^"]+)"/u.exec(page)?.[1];
     expect(requestToken).toBeTruthy();
 
@@ -98,6 +101,26 @@ describe("OAuth Authorization Code with PKCE", () => {
     const oauth = new OAuthHandler(config, new TokenService(config), new MemoryReplayStore(), createLogger(config));
     expect(oauth.metadata().status).toBe(200);
     expect(oauth.resourceMetadata().status).toBe(200);
+  });
+
+  test("allows only the registered loopback callback origin in form-action", async () => {
+    const config = testConfig();
+    const tokens = new TokenService(config);
+    const oauth = new OAuthHandler(config, tokens, new MemoryReplayStore(), createLogger(config));
+    const redirectUri = "http://127.0.0.1:52207/callback/random-path";
+    const clientId = await tokens.issueClient({ redirectUris: [redirectUri], clientName: "Codex CLI" });
+    const url = new URL("https://mcp.example.test/oauth/authorize");
+    url.search = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      code_challenge: "x".repeat(43),
+      code_challenge_method: "S256",
+      scope: "wallet:read",
+    }).toString();
+
+    const response = await oauth.authorizeGet(new Request(url), "127.0.0.1");
+    expect(response.headers.get("content-security-policy")).toContain("form-action 'self' http://127.0.0.1:52207");
   });
 
   test("does not ask for a payout key when payout scopes are absent", async () => {
