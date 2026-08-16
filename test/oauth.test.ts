@@ -50,6 +50,8 @@ describe("OAuth Authorization Code with PKCE", () => {
     const consent = await oauth.authorizeGet(new Request(authorizationUrl), "127.0.0.1");
     expect(consent.status).toBe(200);
     const page = await consent.text();
+    expect(page).toContain('viewBox="0 0 450 144"');
+    expect(page).toContain('id="logo-grad-r0"');
     expect(page).toContain("Payout API key");
     expect(page).toContain("Доступ включает операции со средствами");
     expect(page).toContain("Подключаем…");
