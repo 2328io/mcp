@@ -1,0 +1,58 @@
+{
+  "name": "@2328/mcp-server",
+  "version": "0.2.0",
+  "description": "Secure MCP server and interactive CLI for 2328 merchant accounts",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/2328io/mcp.git"
+  },
+  "homepage": "https://github.com/2328io/mcp#readme",
+  "bugs": {
+    "url": "https://github.com/2328io/mcp/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "bin": {
+    "2328": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "bun": ">=1.3.0"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --target=bun --outdir=dist --sourcemap=external",
+    "verify:package": "bun run build && bun run scripts/package-smoke.ts",
+    "verify:tui": "bun run build && bun run scripts/tui-smoke.ts",
+    "verify:hosted": "bun run build && bun run scripts/hosted-smoke.ts",
+    "dev": "bun --watch src/index.ts",
+    "start": "bun run dist/index.js",
+    "start:hosted": "bun run dist/index.js --serve",
+    "start:mcp": "bun run src/index.ts --mcp",
+    "verify": "bun run typecheck && bun run lint && bun test && bun run build && bun run scripts/package-smoke.ts && bun run scripts/tui-smoke.ts && bun audit",
+    "lint": "eslint .",
+    "test": "bun test --coverage",
+    "test:watch": "bun test --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@clack/prompts": "1.7.0",
+    "@eslint/js": "9.39.1",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "@types/bun": "1.3.14",
+    "cli-table3": "0.6.5",
+    "eslint": "9.39.1",
+    "jose": "6.2.8",
+    "picocolors": "1.1.1",
+    "pino": "10.3.1",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.67.0",
+    "zod": "4.4.3"
+  }
+}

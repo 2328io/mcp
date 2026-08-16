@@ -1,0 +1,18 @@
+FROM oven/bun:1.3.14-alpine AS build
+WORKDIR /app
+COPY package.json bun.lock bunfig.toml ./
+RUN bun install --frozen-lockfile
+COPY tsconfig.json eslint.config.js ./
+COPY src ./src
+RUN bun run typecheck && bun run build
+
+FROM oven/bun:1.3.14-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production TRANSPORT=http HOST=0.0.0.0 PORT=3000
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/package.json ./package.json
+USER bun
+EXPOSE 3000
+HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
+  CMD bun -e "const r=await fetch('http://127.0.0.1:3000/healthz');if(!r.ok)process.exit(1)"
+CMD ["bun", "run", "dist/index.js", "--serve"]
