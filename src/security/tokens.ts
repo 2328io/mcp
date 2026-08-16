@@ -48,6 +48,16 @@ const accessTokenClaims = baseClaims.extend({
   scope: z.string(),
 });
 
+const refreshTokenClaims = baseClaims.extend({
+  typ: z.literal("refresh-token"),
+  credentials: credentialsSchema,
+  sub: z.string(),
+  scope: z.string(),
+  clientId: z.string(),
+  familyId: z.uuid(),
+  sessionExpiresAt: z.number().int(),
+});
+
 const payoutInputSchema = z.object({
   currency: z.string().min(1).max(20),
   network: z.string().min(1).max(50),
@@ -84,6 +94,14 @@ const convertPreparationClaims = baseClaims.extend({
 type ClientClaims = z.infer<typeof clientClaims>;
 type AuthorizationRequestClaims = z.infer<typeof authorizationRequestClaims>;
 type AuthorizationCodeClaims = z.infer<typeof authorizationCodeClaims>;
+export type RefreshTokenClaims = z.infer<typeof refreshTokenClaims>;
+
+export interface IssuedRefreshToken {
+  token: string;
+  tokenId: string;
+  familyId: string;
+  expiresAt: number;
+}
 
 export class TokenService {
   private readonly key: Uint8Array;
@@ -126,12 +144,18 @@ export class TokenService {
   public issueAuthorizationCode(
     request: AuthorizationRequestClaims,
     credentials: Credentials,
+    grantedScope: string = request.scope,
   ): Promise<string> {
+    const requested = new Set(parseScopes(request.scope));
+    const granted = parseScopes(grantedScope);
+    if (granted.length === 0 || granted.some((scope) => !requested.has(scope))) {
+      throw new Error("Granted scopes must be a non-empty subset of requested scopes");
+    }
     return this.encrypt(this.claims("authorization-code", this.config.AUTH_CODE_TTL_SECONDS, {
       clientId: request.clientId,
       redirectUri: request.redirectUri,
       codeChallenge: request.codeChallenge,
-      scope: request.scope,
+      scope: granted.join(" "),
       ...(request.state ? { state: request.state } : {}),
       credentials,
       subject: this.subject(credentials.projectId),
@@ -148,6 +172,43 @@ export class TokenService {
       sub: code.subject,
       scope: code.scope,
     }));
+  }
+
+  public issueAccessTokenFromRefresh(refresh: RefreshTokenClaims): Promise<string> {
+    return this.encrypt(this.claims("access-token", this.config.ACCESS_TOKEN_TTL_SECONDS, {
+      credentials: refresh.credentials,
+      sub: refresh.sub,
+      scope: refresh.scope,
+    }));
+  }
+
+  public issueInitialRefreshToken(code: AuthorizationCodeClaims): Promise<IssuedRefreshToken> {
+    const now = Math.floor(Date.now() / 1_000);
+    return this.issueRefreshToken({
+      credentials: this.credentials(code.credentials),
+      sub: code.subject,
+      scope: code.scope,
+      clientId: code.clientId,
+      familyId: randomUUID(),
+      sessionExpiresAt: now + this.config.REFRESH_TOKEN_TTL_SECONDS,
+    });
+  }
+
+  public rotateRefreshToken(refresh: RefreshTokenClaims): Promise<IssuedRefreshToken> {
+    return this.issueRefreshToken({
+      credentials: this.credentials(refresh.credentials),
+      sub: refresh.sub,
+      scope: refresh.scope,
+      clientId: refresh.clientId,
+      familyId: refresh.familyId,
+      sessionExpiresAt: refresh.sessionExpiresAt,
+    });
+  }
+
+  public async readRefreshToken(token: string): Promise<RefreshTokenClaims> {
+    const claims = refreshTokenClaims.parse(await this.decrypt(token, "refresh-token"));
+    if (claims.exp !== claims.sessionExpiresAt) throw new Error("Invalid refresh token lifetime");
+    return claims;
   }
 
   public async readAccessToken(token: string): Promise<Principal> {
@@ -227,6 +288,34 @@ export class TokenService {
     };
   }
 
+  private async issueRefreshToken(input: {
+    credentials: Credentials;
+    sub: string;
+    scope: string;
+    clientId: string;
+    familyId: string;
+    sessionExpiresAt: number;
+  }): Promise<IssuedRefreshToken> {
+    const now = Math.floor(Date.now() / 1_000);
+    if (input.sessionExpiresAt <= now) throw new Error("Refresh session expired");
+    const tokenId = randomUUID();
+    const claims = {
+      typ: "refresh-token",
+      iss: this.issuer,
+      aud: this.audience,
+      iat: now,
+      exp: input.sessionExpiresAt,
+      jti: tokenId,
+      ...input,
+    };
+    return {
+      token: await this.encrypt(claims),
+      tokenId,
+      familyId: input.familyId,
+      expiresAt: input.sessionExpiresAt,
+    };
+  }
+
   private async encrypt(payload: Record<string, unknown>): Promise<string> {
     return new CompactEncrypt(new TextEncoder().encode(JSON.stringify(payload)))
       .setProtectedHeader({ alg: "dir", enc: "A256GCM", typ: String(payload.typ) })
@@ -254,5 +343,13 @@ export class TokenService {
     return createHash("sha256")
       .update(`${credentials.projectId}\0${credentials.apiKey}\0${credentials.payoutApiKey ?? ""}`)
       .digest("base64url");
+  }
+
+  private credentials(credentials: z.infer<typeof credentialsSchema>): Credentials {
+    return {
+      projectId: credentials.projectId,
+      apiKey: credentials.apiKey,
+      ...(credentials.payoutApiKey ? { payoutApiKey: credentials.payoutApiKey } : {}),
+    };
   }
 }

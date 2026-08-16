@@ -16,6 +16,7 @@ export function testConfig(overrides: Partial<Config> = {}): Config {
     REDIS_URL: "redis://localhost:6379",
     TOKEN_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64url"),
     ACCESS_TOKEN_TTL_SECONDS: 900,
+    REFRESH_TOKEN_TTL_SECONDS: 2_592_000,
     AUTH_CODE_TTL_SECONDS: 120,
     PREPARATION_TTL_SECONDS: 300,
     CONVERT_PREPARATION_TTL_SECONDS: 60,

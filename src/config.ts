@@ -30,6 +30,7 @@ const schema = z
     TOKEN_ENCRYPTION_KEY: optional(z.string()),
     TOKEN_ENCRYPTION_KEY_FILE: optional(z.string().min(1).max(4_096)),
     ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().min(300).max(3_600).default(900),
+    REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().min(3_600).max(90 * 24 * 60 * 60).default(30 * 24 * 60 * 60),
     AUTH_CODE_TTL_SECONDS: z.coerce.number().int().min(30).max(300).default(120),
     PREPARATION_TTL_SECONDS: z.coerce.number().int().min(30).max(600).default(300),
     CONVERT_PREPARATION_TTL_SECONDS: z.coerce.number().int().min(15).max(120).default(60),

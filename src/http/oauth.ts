@@ -24,6 +24,30 @@ const SCOPE_DESCRIPTIONS: Record<string, string> = {
   "convert:execute": "Конвертация средств",
 };
 
+const READ_ONLY_SCOPES = new Set([
+  "wallet:read",
+  "market:read",
+  "invoice:read",
+  "static-wallet:read",
+  "payout:read",
+  "payout:quote",
+  "convert:quote",
+]);
+
+const DEFAULT_SCOPES = new Set([
+  "wallet:read",
+  "market:read",
+  "invoice:read",
+  "static-wallet:read",
+  "convert:quote",
+]);
+
+const SCOPE_GROUPS = [
+  { id: "read", title: "Просмотр", scopes: SCOPES.filter((scope) => READ_ONLY_SCOPES.has(scope)) },
+  { id: "manage", title: "Управление", scopes: ["invoice:create", "static-wallet:create", "static-wallet:update"] },
+  { id: "money", title: "Операции со средствами", scopes: ["payout:create", "convert:execute"] },
+] as const;
+
 function validRedirectUri(value: string): boolean {
   try {
     const url = new URL(value);
@@ -44,32 +68,41 @@ function redirectWith(
   return Response.redirect(url, status);
 }
 
-function authorizationPage(requestToken: string, scopes: readonly string[], redirectUri: string, error?: string): Response {
+function authorizationPage(
+  requestToken: string,
+  scopes: readonly string[],
+  redirectUri: string,
+  error?: string,
+  selectedScopes?: readonly string[],
+): Response {
   const nonce = randomBytes(18).toString("base64");
   const callbackOrigin = new URL(redirectUri).origin;
-  const moneyMoving = new Set(["payout:create", "convert:execute"]);
-  const scopeItems = scopes.map((scope) => `<li class="permission${moneyMoving.has(scope) ? " permission--money" : ""}"><span class="permission-mark" aria-hidden="true">✓</span><span>${Bun.escapeHTML(SCOPE_DESCRIPTIONS[scope] ?? scope)}</span></li>`).join("");
+  const selected = new Set(selectedScopes ?? scopes.filter((scope) => DEFAULT_SCOPES.has(scope)));
+  const scopeGroups = SCOPE_GROUPS.map((group) => {
+    const available = group.scopes.filter((scope) => scopes.includes(scope));
+    if (available.length === 0) return "";
+    const items = available.map((scope) => `<label class="permission${group.id === "money" ? " permission--money" : ""}"><input type="checkbox" name="scope" value="${Bun.escapeHTML(scope)}"${selected.has(scope) ? " checked" : ""}><span>${Bun.escapeHTML(SCOPE_DESCRIPTIONS[scope] ?? scope)}</span></label>`).join("");
+    const warning = group.id === "money" ? '<p class="scope-note">Каждая операция требует отдельного подтверждения.</p>' : "";
+    return `<fieldset class="scope-group scope-group--${group.id}"><legend>${group.title}</legend><div class="permissions">${items}</div>${warning}</fieldset>`;
+  }).join("");
   const errorBlock = error ? `<div class="error" role="alert">${Bun.escapeHTML(error)}</div>` : "";
+  const payoutSelected = [...selected].some((scope) => scope.startsWith("payout:"));
   const payoutField = scopes.some((scope) => scope.startsWith("payout:"))
-    ? '<div class="field"><label for="payout_api_key">Payout API key <span>(отдельный ключ)</span></label><input id="payout_api_key" name="payout_api_key" type="password" required minlength="16" maxlength="512" autocomplete="off"></div>'
-    : "";
-  const moneyWarning = scopes.some((scope) => moneyMoving.has(scope))
-    ? '<div class="notice"><span class="notice-mark" aria-hidden="true">!</span><p>Доступ включает операции со средствами. Каждая выплата требует отдельного подтверждения.</p></div>'
+    ? `<div class="field" id="payout-field"${payoutSelected ? "" : " hidden"}><label for="payout_api_key">Payout API key <span>(отдельный ключ)</span></label><input id="payout_api_key" name="payout_api_key" type="password"${payoutSelected ? " required" : " disabled"} minlength="16" maxlength="512" autocomplete="off"></div>`
     : "";
   const body = `<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Подключить 2328</title><style>
-:root{color-scheme:dark;--foreground:220 16% 97%;--bg:#121214;--surface:#19191c;--surface-soft:#202024;--text:#f7f7f8;--muted:#a3a3ad;--border:#323238;--accent:#f4512f;--accent-soft:#ffaf6e;--danger:#ff7864;--shadow:0 32px 100px rgba(0,0,0,.42)}*{box-sizing:border-box}html{min-height:100%;background:var(--bg)}body{min-height:100vh;margin:0;color:var(--text);background:radial-gradient(circle at 50% 18%,rgba(241,73,43,.11),transparent 34rem),var(--bg);font-family:Geist,"Segoe UI",sans-serif;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}body:before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:48px 48px;mask-image:linear-gradient(to bottom,black,transparent 65%)}.shell{position:relative;width:min(100% - 32px,640px);margin:0 auto;padding:56px 0}.brand{display:block;width:100px;margin:0 0 26px;color:var(--text);text-decoration:none}.brand-logo{display:block;width:100%;height:auto}.card{overflow:hidden;border:1px solid var(--border);border-radius:20px;background:rgba(25,25,28,.94);box-shadow:var(--shadow);backdrop-filter:blur(16px)}.card-accent{height:3px;background:linear-gradient(90deg,var(--accent-soft),var(--accent) 55%,transparent)}.content{padding:34px}h1{margin:0;font-size:32px;font-weight:520;line-height:1.08;letter-spacing:-1.4px}.lead{margin:10px 0 28px;color:var(--muted);font-size:16px}.section{padding-top:24px;border-top:1px solid var(--border)}.section-title{margin:0 0 14px;color:var(--muted);font-size:12px;font-weight:650;letter-spacing:.09em;text-transform:uppercase}.permissions{display:grid;gap:8px;margin:0;padding:0;list-style:none}.permission{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:10px;background:var(--surface-soft);color:#d9d9de}.permission-mark{display:grid;flex:0 0 18px;height:18px;margin-top:2px;place-items:center;border-radius:50%;background:rgba(241,73,43,.15);color:var(--accent-soft);font-size:11px;font-weight:800}.permission--money{color:var(--text)}.permission--money .permission-mark{background:var(--accent);color:white}.notice{display:flex;gap:11px;margin:14px 0 0;padding:12px 13px;border:1px solid rgba(241,73,43,.42);border-radius:11px;background:rgba(241,73,43,.08);color:#f4c8bf}.notice p{margin:0}.notice-mark{display:grid;flex:0 0 20px;height:20px;place-items:center;border-radius:50%;background:var(--accent);color:white;font-size:12px;font-weight:800}.form{display:grid;gap:17px;margin-top:26px}.field{display:grid;gap:7px}.field label{font-size:13px;font-weight:600}.field label span{color:var(--muted);font-weight:400}input{width:100%;height:48px;padding:0 14px;border:1px solid var(--border);border-radius:10px;outline:0;background:#111113;color:var(--text);font:inherit;transition:border-color .18s ease,box-shadow .18s ease,background .18s ease}input:hover{border-color:#4b4b53}input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(241,73,43,.16);background:#141416}.consent{display:flex;align-items:flex-start;gap:10px;color:#d9d9de;cursor:pointer}.consent input{flex:0 0 18px;width:18px;height:18px;margin-top:2px;accent-color:var(--accent)}button{display:flex;width:100%;height:50px;align-items:center;justify-content:center;gap:9px;border:0;border-radius:10px;background:var(--accent);color:white;font:inherit;font-weight:650;cursor:pointer;transition:transform .18s ease,background .18s ease,box-shadow .18s ease}button:hover{background:#ff5a36;box-shadow:0 12px 30px rgba(241,73,43,.22);transform:translateY(-1px)}button:active{transform:translateY(0)}button:focus-visible{outline:3px solid rgba(255,175,110,.38);outline-offset:2px}button:disabled{background:#343439;color:#8d8d95;box-shadow:none;cursor:wait;transform:none}.button-arrow{font-size:19px;font-weight:400}.submit-status{margin:0;text-align:center;color:var(--muted);font-size:13px}.error{margin:18px 0 0;padding:12px 13px;border:1px solid rgba(255,120,100,.5);border-radius:10px;background:rgba(255,120,100,.08);color:#ffc0b6}.foot{margin:18px 0 0;text-align:center;color:#6f6f78;font-size:12px}@media(max-width:560px){.shell{width:min(100% - 20px,640px);padding:20px 0 28px}.brand{width:94px;margin:0 0 18px}.card{border-radius:16px}.content{padding:24px 20px}h1{font-size:28px}.lead{margin-bottom:24px}.permission{padding:9px 10px}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+:root{color-scheme:dark;--foreground:220 16% 97%;--bg:#121214;--surface:#19191c;--surface-soft:#202024;--text:#f7f7f8;--muted:#a3a3ad;--border:#323238;--accent:#f4512f;--accent-soft:#ffaf6e;--danger:#ff7864;--shadow:0 32px 100px rgba(0,0,0,.42)}*{box-sizing:border-box}html{min-height:100%;background:var(--bg)}body{min-height:100vh;margin:0;color:var(--text);background:radial-gradient(circle at 50% 18%,rgba(241,73,43,.11),transparent 34rem),var(--bg);font-family:Geist,"Segoe UI",sans-serif;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}body:before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:48px 48px;mask-image:linear-gradient(to bottom,black,transparent 65%)}.shell{position:relative;width:min(100% - 32px,640px);margin:0 auto;padding:56px 0}.brand{display:block;width:100px;margin:0 0 26px;color:var(--text);text-decoration:none}.brand-logo{display:block;width:100%;height:auto}.card{overflow:hidden;border:1px solid var(--border);border-radius:20px;background:rgba(25,25,28,.94);box-shadow:var(--shadow);backdrop-filter:blur(16px)}.card-accent{height:3px;background:linear-gradient(90deg,var(--accent-soft),var(--accent) 55%,transparent)}.content{padding:34px}h1{margin:0;font-size:32px;font-weight:520;line-height:1.08;letter-spacing:-1.4px}.lead{margin:10px 0 28px;color:var(--muted);font-size:16px}.section{padding-top:24px;border-top:1px solid var(--border)}.section-title{margin:0 0 14px;color:var(--muted);font-size:12px;font-weight:650;letter-spacing:.09em;text-transform:uppercase}.scope-group{min-width:0;margin:0 0 18px;padding:0;border:0}.scope-group:last-child{margin-bottom:0}.scope-group legend{margin:0 0 8px;color:var(--muted);font-size:12px;font-weight:650;letter-spacing:.04em}.permissions{display:grid;gap:8px}.permission{display:flex;min-height:46px;align-items:center;gap:11px;padding:10px 12px;border:1px solid transparent;border-radius:10px;background:var(--surface-soft);color:#d9d9de;cursor:pointer}.permission:has(input:checked){border-color:rgba(241,73,43,.42);background:rgba(241,73,43,.08);color:var(--text)}.permission input{flex:0 0 19px;width:19px;height:19px;margin:0;accent-color:var(--accent)}.permission--money:has(input:checked){border-color:rgba(255,120,100,.62);background:rgba(241,73,43,.12)}.scope-note{margin:8px 2px 0;color:#d6a39a;font-size:12px}.form{display:grid;gap:17px;margin-top:26px}.field{display:grid;gap:7px}.field label{font-size:13px;font-weight:600}.field label span{color:var(--muted);font-weight:400}.field input{width:100%;height:48px;padding:0 14px;border:1px solid var(--border);border-radius:10px;outline:0;background:#111113;color:var(--text);font:inherit;transition:border-color .18s ease,box-shadow .18s ease,background .18s ease}.field input:hover{border-color:#4b4b53}.field input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(241,73,43,.16);background:#141416}.actions{display:grid;grid-template-columns:1fr 2fr;gap:10px}.button{display:flex;width:100%;min-height:50px;align-items:center;justify-content:center;gap:9px;border:0;border-radius:10px;font:inherit;font-weight:650;cursor:pointer;transition:transform .18s ease,background .18s ease,box-shadow .18s ease}.button--primary{background:var(--accent);color:white}.button--primary:hover{background:#ff5a36;box-shadow:0 12px 30px rgba(241,73,43,.22);transform:translateY(-1px)}.button--secondary{border:1px solid var(--border);background:transparent;color:var(--muted)}.button--secondary:hover{background:var(--surface-soft);color:var(--text)}.button:active{transform:translateY(0)}.button:focus-visible{outline:3px solid rgba(255,175,110,.38);outline-offset:2px}.button:disabled{background:#343439;color:#8d8d95;box-shadow:none;cursor:wait;transform:none}.button-arrow{font-size:19px;font-weight:400}.submit-status{margin:0;text-align:center;color:var(--muted);font-size:13px}.error{margin:18px 0 0;padding:12px 13px;border:1px solid rgba(255,120,100,.5);border-radius:10px;background:rgba(255,120,100,.08);color:#ffc0b6}.foot{margin:18px 0 0;text-align:center;color:#6f6f78;font-size:12px}[hidden]{display:none!important}@media(max-width:560px){.shell{width:min(100% - 20px,640px);padding:20px 0 28px}.brand{width:94px;margin:0 0 18px}.card{border-radius:16px}.content{padding:24px 20px}h1{font-size:28px}.lead{margin-bottom:24px}.permission{padding:9px 10px}.actions{grid-template-columns:1fr}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 </style></head>
 <body><main class="shell"><a class="brand" href="https://2328.io">${BRAND_LOGO}</a><section class="card"><div class="card-accent"></div><div class="content"><h1>Подключить 2328</h1><p class="lead">Подтвердите доступ к проекту для MCP-клиента.</p>${errorBlock}
-<div class="section"><p class="section-title">Доступ</p><ul class="permissions">${scopeItems}</ul>${moneyWarning}</div>
-<form class="form" method="post" action="/oauth/authorize" autocomplete="off"><input type="hidden" name="request_token" value="${Bun.escapeHTML(requestToken)}">
+<form method="post" action="/oauth/authorize" autocomplete="off"><input type="hidden" name="request_token" value="${Bun.escapeHTML(requestToken)}">
+<div class="section"><p class="section-title">Доступ</p>${scopeGroups}</div><div class="form">
 <div class="field"><label for="project_id">Project UUID</label><input id="project_id" name="project_id" required minlength="8" maxlength="128" spellcheck="false" autocapitalize="none" autocomplete="off"></div>
 <div class="field"><label for="api_key">API key</label><input id="api_key" name="api_key" type="password" required minlength="16" maxlength="512" autocomplete="off"></div>
 ${payoutField}
-<label class="consent"><input type="checkbox" name="consent" value="yes" required><span>Разрешить этот доступ</span></label>
-<button type="submit"><span>Подключить</span><span class="button-arrow" aria-hidden="true">→</span></button><p id="submit-status" class="submit-status" role="status" aria-live="polite" hidden>Проверяем доступ…</p></form></div></section><p class="foot">2328 MCP</p></main>
-<script nonce="${nonce}">const form=document.querySelector("form");const button=form?.querySelector('button[type="submit"]');const status=document.querySelector("#submit-status");form?.addEventListener("submit",()=>{if(button instanceof HTMLButtonElement){button.disabled=true;button.textContent="Подключаем…";button.setAttribute("aria-busy","true")}if(status instanceof HTMLElement)status.hidden=false});</script></body></html>`;
+<div class="actions"><button class="button button--secondary" type="submit" name="decision" value="deny" formnovalidate>Отмена</button><button class="button button--primary" type="submit" name="decision" value="approve"><span>Подключить</span><span class="button-arrow" aria-hidden="true">→</span></button></div><p id="submit-status" class="submit-status" role="status" aria-live="polite" hidden>Проверяем доступ…</p></div></form></div></section><p class="foot">2328 MCP</p></main>
+<script nonce="${nonce}">const form=document.querySelector("form");const approve=form?.querySelector('[value="approve"]');const status=document.querySelector("#submit-status");const payoutField=document.querySelector("#payout-field");const payoutKey=document.querySelector("#payout_api_key");const syncPayout=()=>{const enabled=Boolean(form?.querySelector('input[name="scope"][value^="payout:"]:checked'));if(payoutField instanceof HTMLElement)payoutField.hidden=!enabled;if(payoutKey instanceof HTMLInputElement){payoutKey.disabled=!enabled;payoutKey.required=enabled}};form?.querySelectorAll('input[name="scope"]').forEach((input)=>input.addEventListener("change",syncPayout));syncPayout();form?.addEventListener("submit",(event)=>{if(event.submitter!==approve)return;if(approve instanceof HTMLButtonElement){approve.disabled=true;approve.textContent="Подключаем…";approve.setAttribute("aria-busy","true")}if(status instanceof HTMLElement)status.hidden=false});</script></body></html>`;
   return new Response(body, {
     status: error ? 400 : 200,
     headers: {
@@ -102,7 +135,7 @@ export class OAuthHandler {
       token_endpoint: `${this.issuer}/oauth/token`,
       registration_endpoint: `${this.issuer}/oauth/register`,
       response_types_supported: ["code"],
-      grant_types_supported: ["authorization_code"],
+      grant_types_supported: ["authorization_code", "refresh_token"],
       code_challenge_methods_supported: ["S256"],
       token_endpoint_auth_methods_supported: ["none"],
       scopes_supported: SCOPES,
@@ -140,7 +173,7 @@ export class OAuthHandler {
         redirect_uris: redirectUris,
         client_name: clientName,
         token_endpoint_auth_method: "none",
-        grant_types: ["authorization_code"],
+        grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
       }, 201);
     } catch {
@@ -176,26 +209,36 @@ export class OAuthHandler {
     try {
       const form = await readForm(request);
       const authorization = await this.tokens.readAuthorizationRequest(form.get("request_token") ?? "");
-      if (form.get("consent") !== "yes") {
+      if (form.get("decision") !== "approve") {
         await this.store.consume("authorization-request", authorization.jti, 600);
         return redirectWith(authorization.redirectUri, { error: "access_denied", state: authorization.state }, 303);
+      }
+      const requestedScopes = parseScopes(authorization.scope);
+      const requestedScopeSet = new Set<string>(requestedScopes);
+      const submittedScopes = form.getAll("scope");
+      if (submittedScopes.some((scope) => !requestedScopeSet.has(scope))) {
+        return authorizationPage(form.get("request_token") ?? "", requestedScopes, authorization.redirectUri, "Выбран недоступный уровень доступа.");
+      }
+      const selectedScopeSet = new Set(submittedScopes);
+      const scopes = requestedScopes.filter((scope) => selectedScopeSet.has(scope));
+      if (scopes.length === 0) {
+        return authorizationPage(form.get("request_token") ?? "", requestedScopes, authorization.redirectUri, "Выберите хотя бы один уровень доступа.", scopes);
       }
       const projectId = form.get("project_id")?.trim() ?? "";
       const apiKey = form.get("api_key") ?? "";
       const payoutApiKeyValue = form.get("payout_api_key")?.trim() ?? "";
       if (projectId.length < 8 || projectId.length > 128 || apiKey.length < 16 || apiKey.length > 512 || payoutApiKeyValue.length > 512) {
-        return authorizationPage(form.get("request_token") ?? "", parseScopes(authorization.scope), authorization.redirectUri, "Проверьте Project UUID и ключи.");
+        return authorizationPage(form.get("request_token") ?? "", requestedScopes, authorization.redirectUri, "Проверьте Project UUID и ключи.", scopes);
       }
-      const scopes = parseScopes(authorization.scope);
       const needsPayoutKey = scopes.some((scope) => scope.startsWith("payout:"));
       if (needsPayoutKey && payoutApiKeyValue.length < 16) {
-        return authorizationPage(form.get("request_token") ?? "", scopes, authorization.redirectUri, "Для payout scopes нужен отдельный Payout API key.");
+        return authorizationPage(form.get("request_token") ?? "", requestedScopes, authorization.redirectUri, "Для payout scopes нужен отдельный Payout API key.", scopes);
       }
       const credentials = { projectId, apiKey, ...(needsPayoutKey ? { payoutApiKey: payoutApiKeyValue } : {}) };
       const api = new Payments2328Client(this.config, credentials, this.logger, this.fetchImplementation);
       await api.balances();
       if (!await this.store.consume("authorization-request", authorization.jti, 600)) return oauthError("invalid_request", "Authorization request was already used");
-      const code = await this.tokens.issueAuthorizationCode(authorization, credentials);
+      const code = await this.tokens.issueAuthorizationCode(authorization, credentials, scopes.join(" "));
       return redirectWith(authorization.redirectUri, { code, state: authorization.state }, 303);
     } catch (error) {
       this.logger.warn({ error: error instanceof Error ? error.message : "unknown", ip }, "OAuth account linking failed");
@@ -207,7 +250,9 @@ export class OAuthHandler {
     if (await this.limited("token", ip, 60, 60)) return oauthError("temporarily_unavailable", "Rate limit exceeded", 429);
     try {
       const form = await readForm(request);
-      if (form.get("grant_type") !== "authorization_code") return oauthError("unsupported_grant_type", "Only authorization_code is supported");
+      const grantType = form.get("grant_type");
+      if (grantType === "refresh_token") return await this.refreshToken(form);
+      if (grantType !== "authorization_code") return oauthError("unsupported_grant_type", "Supported grants: authorization_code, refresh_token");
       const code = await this.tokens.readAuthorizationCode(form.get("code") ?? "");
       if (form.get("client_id") !== code.clientId || form.get("redirect_uri") !== code.redirectUri) return oauthError("invalid_grant", "Authorization code binding mismatch");
       const requestedResource = form.get("resource");
@@ -215,14 +260,45 @@ export class OAuthHandler {
       const verifier = form.get("code_verifier") ?? "";
       if (verifier.length < 43 || verifier.length > 128 || !this.tokens.verifyPkce(verifier, code.codeChallenge)) return oauthError("invalid_grant", "PKCE verification failed");
       if (!await this.store.consume("authorization-code", code.jti, this.config.AUTH_CODE_TTL_SECONDS)) return oauthError("invalid_grant", "Authorization code was already used");
+      const refresh = await this.tokens.issueInitialRefreshToken(code);
+      const refreshTtl = refresh.expiresAt - Math.floor(Date.now() / 1_000);
+      if (refreshTtl <= 0 || !await this.store.initializeRefreshFamily(refresh.familyId, refresh.tokenId, refreshTtl)) {
+        return oauthError("temporarily_unavailable", "Could not initialize refresh session", 503);
+      }
       return json({
         access_token: await this.tokens.issueAccessToken(code),
+        refresh_token: refresh.token,
         token_type: "Bearer",
         expires_in: this.config.ACCESS_TOKEN_TTL_SECONDS,
+        refresh_token_expires_in: refreshTtl,
         scope: code.scope,
       });
     } catch {
       return oauthError("invalid_grant", "Invalid or expired authorization code");
+    }
+  }
+
+  private async refreshToken(form: URLSearchParams): Promise<Response> {
+    try {
+      const refresh = await this.tokens.readRefreshToken(form.get("refresh_token") ?? "");
+      if (form.get("client_id") !== refresh.clientId) return oauthError("invalid_grant", "Refresh token client binding mismatch");
+      const requestedResource = form.get("resource");
+      if (requestedResource && requestedResource !== this.resource) return oauthError("invalid_target", "Token is not valid for the requested resource");
+      const next = await this.tokens.rotateRefreshToken(refresh);
+      const refreshTtl = next.expiresAt - Math.floor(Date.now() / 1_000);
+      if (refreshTtl <= 0) return oauthError("invalid_grant", "Refresh session expired");
+      const rotation = await this.store.rotateRefreshFamily(refresh.familyId, refresh.jti, next.tokenId, refreshTtl);
+      if (rotation !== "rotated") return oauthError("invalid_grant", "Refresh token was already used or revoked");
+      return json({
+        access_token: await this.tokens.issueAccessTokenFromRefresh(refresh),
+        refresh_token: next.token,
+        token_type: "Bearer",
+        expires_in: this.config.ACCESS_TOKEN_TTL_SECONDS,
+        refresh_token_expires_in: refreshTtl,
+        scope: refresh.scope,
+      });
+    } catch {
+      return oauthError("invalid_grant", "Invalid or expired refresh token");
     }
   }
 

@@ -80,7 +80,7 @@ If the payout key is absent, payout scopes are omitted from the local principal.
 
 ## Hosted Streamable HTTP
 
-The hosted mode uses OAuth Authorization Code with PKCE, short-lived encrypted access tokens and Redis replay protection.
+The hosted mode uses OAuth Authorization Code with PKCE, short-lived encrypted access tokens and rotating refresh tokens. Ordinary read-only scopes are selected by default; payout, management and money-moving scopes require separate selection.
 
 The production endpoint is `https://mcp.2328.io/mcp`. The dedicated-server deployment terminates TLS in Caddy and keeps both the MCP application and Redis off the public host network.
 
@@ -108,6 +108,10 @@ docker compose up --build -d
 ```
 
 Connect an OAuth-capable MCP client to `https://mcp.example.com/mcp`. Users link a project using project keys; the service never asks for the 2328 account password. The compose port is loopback-only so a reverse proxy or ingress must own public TLS.
+
+## ChatGPT and Codex plugin
+
+The installable plugin package is in [`plugins/2328-wallet`](plugins/2328-wallet). It contains the validated manifest, hosted MCP configuration and official 2328 mark. ChatGPT additionally requires the hosted MCP connection to be registered in Developer mode; after registration, add its generated `plugin_asdk_app...` mapping as described in the plugin README.
 
 ## Commands
 

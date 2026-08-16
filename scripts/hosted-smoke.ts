@@ -1,4 +1,5 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+import { RedisReplayStore } from "../src/security/redis-replay-store.js";
 
 const redisUrl = process.env.REDIS_URL;
 if (!redisUrl) throw new Error("REDIS_URL is required for the hosted smoke test");
@@ -36,6 +37,17 @@ async function waitForReady(): Promise<void> {
 
 try {
   await waitForReady();
+  const refreshStore = new RedisReplayStore(redisUrl);
+  await refreshStore.connect();
+  try {
+    const familyId = randomUUID();
+    if (!await refreshStore.initializeRefreshFamily(familyId, "token-1", 60)) throw new Error("Refresh family initialization failed");
+    if (await refreshStore.rotateRefreshFamily(familyId, "token-1", "token-2", 60) !== "rotated") throw new Error("Refresh rotation failed");
+    if (await refreshStore.rotateRefreshFamily(familyId, "token-1", "token-3", 60) !== "reused") throw new Error("Refresh reuse was not detected");
+    if (await refreshStore.rotateRefreshFamily(familyId, "token-2", "token-3", 60) !== "revoked") throw new Error("Refresh family was not revoked");
+  } finally {
+    refreshStore.close();
+  }
   const health = await fetch(`${origin}/healthz`);
   if (!health.ok || (await health.json() as { status?: string }).status !== "ok") {
     throw new Error("Hosted health check failed");
@@ -64,7 +76,7 @@ try {
     throw new Error("Hosted security headers are missing");
   }
 
-  console.log("Hosted smoke passed: health, readiness, discovery, Redis rate state, OAuth registration");
+  console.log("Hosted smoke passed: health, readiness, discovery, Redis refresh state, OAuth registration");
 } finally {
   child.kill("SIGTERM");
   await Promise.race([child.exited, Bun.sleep(3_000)]);

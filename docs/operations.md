@@ -117,7 +117,7 @@ Never label metrics with project UUIDs, addresses, order IDs or tokens.
 2. Deploy all new instances with a new encryption key.
 3. Remove old instances.
 
-This revokes outstanding authorization requests, codes, access tokens and payout preparations. Users reconnect through OAuth. Project keys are rotated in 2328 independently.
+This revokes outstanding authorization requests, codes, access tokens, refresh tokens and payout preparations. Users reconnect through OAuth. Project keys are rotated in 2328 independently.
 
 ## Failure behavior
 

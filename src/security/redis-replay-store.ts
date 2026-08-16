@@ -1,6 +1,6 @@
 import { RedisClient } from "bun";
 import { createHash } from "node:crypto";
-import type { ReplayStore } from "./replay-store.js";
+import type { RefreshRotationResult, ReplayStore } from "./replay-store.js";
 
 export class RedisReplayStore implements ReplayStore {
   private client: RedisClient | undefined;
@@ -42,6 +42,37 @@ export class RedisReplayStore implements ReplayStore {
     const count = Number(result);
     if (!Number.isSafeInteger(count) || count < 1) throw new Error("Redis returned an invalid rate counter");
     return count;
+  }
+
+  public async initializeRefreshFamily(familyId: string, currentTokenId: string, ttlSeconds: number): Promise<boolean> {
+    const result: unknown = await this.connectedClient().send("SET", [
+      this.key("refresh-family", familyId),
+      currentTokenId,
+      "NX",
+      "EX",
+      String(ttlSeconds),
+    ]);
+    return result === "OK";
+  }
+
+  public async rotateRefreshFamily(
+    familyId: string,
+    presentedTokenId: string,
+    nextTokenId: string,
+    ttlSeconds: number,
+  ): Promise<RefreshRotationResult> {
+    const result: unknown = await this.connectedClient().send("EVAL", [
+      "local current = redis.call('SET', KEYS[1], ARGV[2], 'GET', 'EX', ARGV[3]); if not current or current == '__revoked__' then redis.call('SET', KEYS[1], '__revoked__', 'EX', ARGV[3]); return 3 end; if current ~= ARGV[1] then redis.call('SET', KEYS[1], '__revoked__', 'EX', ARGV[3]); return 2 end; return 1",
+      "1",
+      this.key("refresh-family", familyId),
+      presentedTokenId,
+      nextTokenId,
+      String(ttlSeconds),
+    ]);
+    if (Number(result) === 1) return "rotated";
+    if (Number(result) === 2) return "reused";
+    if (Number(result) === 3) return "revoked";
+    throw new Error("Redis returned an invalid refresh rotation result");
   }
 
   public async ready(): Promise<boolean> {

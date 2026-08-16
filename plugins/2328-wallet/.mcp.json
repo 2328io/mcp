@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wallet2328": {
+      "type": "http",
+      "url": "https://mcp.2328.io/mcp"
+    }
+  }
+}

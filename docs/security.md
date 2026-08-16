@@ -10,12 +10,13 @@
 ## Controls
 
 - OAuth protected-resource and authorization-server discovery per RFC 9728/RFC 8414.
-- Authorization Code only; PKCE S256 is mandatory; redirect URIs require HTTPS except loopback clients.
+- Authorization Code and rotating refresh-token grants; PKCE S256 is mandatory for the authorization-code exchange; redirect URIs require HTTPS except loopback clients.
 - Authorization form submissions use `303 See Other` to complete the callback as a GET. The form disables itself while credentials are verified to prevent accidental replay of its one-time authorization request.
 - The authorization page limits `form-action` to its own submission endpoint and the exact registered callback origin, including loopback origins with ephemeral ports.
 - One-time authorization request and code identifiers enforced in Redis.
+- One-time refresh-token rotation with atomic family state in Redis; stale-token reuse revokes the full refresh family.
 - A256GCM encrypted opaque tokens with strict issuer, audience, type and expiry checks.
-- Least-privilege scopes; payout actions require the separate payout key.
+- Least-privilege scopes with separate consent groups; ordinary read-only scopes are selected by default, while payout, management and money-moving scopes are not. Payout access requires the separate payout key.
 - Two-step payout and conversion flows with immutable short-lived preparations and exact confirmations.
 - Conversion execution has no transport-level retry; ambiguous timeouts require reconciliation.
 - Monetary values are decimal strings. Exponent notation and floating-point conversion are rejected.
@@ -29,7 +30,7 @@
 
 Use a secrets manager for `TOKEN_ENCRYPTION_KEY`, Redis credentials and TLS keys. The production Compose deployment mounts the token key and Redis password as service-scoped files under `/run/secrets`; their values are not placed in Compose environment variables. Source files are read-only inside a root-only host directory because file-backed Compose secrets retain host permissions on Linux and must be readable by non-root containers. Do not put 2328 project keys into hosted-server environment variables; users enter them during their own OAuth connection. For local use, the CLI stores keys through the operating system credential store using `Bun.secrets`. Headless MCP hosts may pass keys directly to the child process environment. Profile metadata never contains key values.
 
-Access tokens contain encrypted project keys because the current 2328 API authenticates with long-lived HMAC secrets. They are never persisted by this service. Protect the hosted endpoint with TLS, prevent access-token logging at every proxy layer and keep the default 15-minute TTL.
+Access and refresh tokens contain encrypted project keys because the current 2328 API authenticates with long-lived HMAC secrets. They are never persisted by this service. Protect the hosted endpoint with TLS, prevent token logging at every proxy layer, keep the default 15-minute access-token TTL and treat refresh tokens as credentials. The default refresh session lasts 30 days without sliding extension.
 
 ## Deployment checklist
 

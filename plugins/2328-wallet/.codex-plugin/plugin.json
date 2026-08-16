@@ -1,0 +1,33 @@
+{
+  "name": "2328-wallet",
+  "version": "0.3.0",
+  "description": "Secure access to a 2328 wallet through the hosted MCP server.",
+  "author": {
+    "name": "2328",
+    "url": "https://2328.io"
+  },
+  "homepage": "https://github.com/2328io/mcp#readme",
+  "repository": "https://github.com/2328io/mcp",
+  "license": "Apache-2.0",
+  "keywords": ["2328", "wallet", "payments", "mcp"],
+  "interface": {
+    "displayName": "2328 Wallet",
+    "shortDescription": "Balances, invoices, payouts and conversions",
+    "longDescription": "Work with a 2328 project through scoped OAuth access. Money movement uses explicit prepare and confirm steps.",
+    "developerName": "2328",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://2328.io",
+    "privacyPolicyURL": "https://2328.io/privacy/",
+    "termsOfServiceURL": "https://2328.io/terms/",
+    "defaultPrompt": [
+      "Покажи доступные балансы в 2328.",
+      "Создай счёт в 2328 по указанным параметрам.",
+      "Подготовь вывод USDT и покажи комиссию до подтверждения."
+    ],
+    "brandColor": "#F4512F",
+    "composerIcon": "./assets/icon.svg",
+    "logo": "./assets/icon.svg"
+  },
+  "mcpServers": "./.mcp.json"
+}

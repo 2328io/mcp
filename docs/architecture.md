@@ -8,7 +8,7 @@ flowchart LR
     Browser["User browser"] -->|Project keys + consent| MCP
     Local["CLI or local MCP client"] -->|OS credential store / stdio| MCP
     MCP -->|HMAC signed requests| API["2328 merchant API"]
-    MCP -->|one-time JTI + rate counters| Redis[(Redis 7.2+)]
+    MCP -->|one-time JTI + refresh families + rate counters| Redis[(Redis 7.2+)]
 ```
 
 ## Runtime paths
@@ -18,13 +18,15 @@ flowchart LR
 - Interactive CLI: `2328` exposes payments, payouts, static wallets, conversions and market/account views without involving an LLM.
 - 2328 API: exact-body HMAC SHA-256 using the ordinary project key or the separate payout key.
 
-Remote access and local access use the same tool registry and validation rules. No application database is required. Redis stores only expiring replay identifiers and rate-limit counters; it never stores 2328 credentials.
+Remote access and local access use the same tool registry and validation rules. No application database is required. Redis stores only expiring replay identifiers, active refresh-family token IDs and rate-limit counters; it never stores 2328 credentials.
 
 ## Authorization
 
 The bundled authorization server implements Authorization Code with PKCE S256 and dynamic client registration for public MCP clients. Authorization codes, access tokens, payout preparations and conversion preparations are compact JWE values encrypted with A256GCM. They bind issuer, audience, subject, scope, expiry and a unique identifier.
 
-The connection screen asks for project credentials, not the 2328 account password. The ordinary API key is verified with `GET /balance`. A payout key is required when any payout scope is requested. The access token lifetime is 15 minutes by default and there is no refresh token: the user must reconnect after expiry.
+The connection screen asks for project credentials, not the 2328 account password. Requested scopes are shown separately: ordinary read-only access is selected by default, while payout, management and money-moving access require explicit selection. The ordinary API key is verified with `GET /balance`; a payout key is required only when the granted scope set contains a payout scope.
+
+Access tokens live for 15 minutes by default. A refresh session has a 30-day absolute lifetime and uses one-time refresh-token rotation. Redis atomically replaces the current token ID for the family. Reuse of an older token revokes the complete family, including the newest token, and requires the user to reconnect. Rotation never extends the session's original expiry.
 
 This design matches the current 2328 HMAC API. A future first-party 2328 authorization service can replace the bundled authorization routes without changing MCP tools: issue delegated tokens from the 2328 account UI and resolve them to a project-scoped upstream credential.
 

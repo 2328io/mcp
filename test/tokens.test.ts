@@ -36,6 +36,49 @@ describe("encrypted OAuth and confirmation tokens", () => {
     expect(access).not.toContain(principal.credentials.apiKey);
   });
 
+  test("keeps refresh rotation inside one absolute session lifetime", async () => {
+    const service = new TokenService(testConfig());
+    const clientId = await service.issueClient({ redirectUris: ["https://client.example/cb"], clientName: "Client" });
+    const request = await service.issueAuthorizationRequest({
+      clientId,
+      redirectUri: "https://client.example/cb",
+      codeChallenge: "x".repeat(43),
+      scope: "wallet:read payout:create",
+    });
+    const code = await service.issueAuthorizationCode(
+      await service.readAuthorizationRequest(request),
+      principal.credentials,
+      "wallet:read",
+    );
+    const codeClaims = await service.readAuthorizationCode(code);
+    const initial = await service.issueInitialRefreshToken(codeClaims);
+    const initialClaims = await service.readRefreshToken(initial.token);
+    const rotated = await service.rotateRefreshToken(initialClaims);
+    const rotatedClaims = await service.readRefreshToken(rotated.token);
+    expect(rotated.familyId).toBe(initial.familyId);
+    expect(rotated.tokenId).not.toBe(initial.tokenId);
+    expect(rotated.expiresAt).toBe(initial.expiresAt);
+    expect(rotatedClaims.scope).toBe("wallet:read");
+    expect(rotatedClaims.clientId).toBe(clientId);
+  });
+
+  test("rejects scopes outside the authorization request", async () => {
+    const service = new TokenService(testConfig());
+    const clientId = await service.issueClient({ redirectUris: ["https://client.example/cb"], clientName: "Client" });
+    const requestToken = await service.issueAuthorizationRequest({
+      clientId,
+      redirectUri: "https://client.example/cb",
+      codeChallenge: "x".repeat(43),
+      scope: "wallet:read",
+    });
+    const request = await service.readAuthorizationRequest(requestToken);
+    await expect(Promise.resolve().then(() => service.issueAuthorizationCode(
+      request,
+      principal.credentials,
+      "wallet:read payout:create",
+    ))).rejects.toThrow("subset");
+  });
+
   test("rejects tampered tokens", async () => {
     const service = new TokenService(testConfig());
     const token = await service.issueClient({ redirectUris: ["https://client.example/cb"], clientName: "Client" });

@@ -1,6 +1,6 @@
 {
   "name": "@2328/mcp-server",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Secure MCP server and interactive CLI for 2328 merchant accounts",
   "license": "Apache-2.0",
   "repository": {

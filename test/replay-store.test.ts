@@ -14,4 +14,13 @@ describe("replay protection", () => {
     expect(await store.increment("rate", "ip", 60)).toBe(2);
     store.close();
   });
+
+  test("rotates refresh families and revokes the family on reuse", async () => {
+    const store = new MemoryReplayStore();
+    expect(await store.initializeRefreshFamily("family", "token-1", 60)).toBeTrue();
+    expect(await store.initializeRefreshFamily("family", "other", 60)).toBeFalse();
+    expect(await store.rotateRefreshFamily("family", "token-1", "token-2", 60)).toBe("rotated");
+    expect(await store.rotateRefreshFamily("family", "token-1", "token-3", 60)).toBe("reused");
+    expect(await store.rotateRefreshFamily("family", "token-2", "token-3", 60)).toBe("revoked");
+  });
 });
