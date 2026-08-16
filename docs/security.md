@@ -25,7 +25,7 @@
 
 ## Secrets
 
-Use a secrets manager for `TOKEN_ENCRYPTION_KEY`, Redis credentials and TLS keys. The production Compose deployment mounts the token key and Redis password as service-scoped files under `/run/secrets`; their values are not placed in Compose environment variables. Do not put 2328 project keys into hosted-server environment variables; users enter them during their own OAuth connection. For local use, the CLI stores keys through the operating system credential store using `Bun.secrets`. Headless MCP hosts may pass keys directly to the child process environment. Profile metadata never contains key values.
+Use a secrets manager for `TOKEN_ENCRYPTION_KEY`, Redis credentials and TLS keys. The production Compose deployment mounts the token key and Redis password as service-scoped files under `/run/secrets`; their values are not placed in Compose environment variables. Source files are read-only inside a root-only host directory because file-backed Compose secrets retain host permissions on Linux and must be readable by non-root containers. Do not put 2328 project keys into hosted-server environment variables; users enter them during their own OAuth connection. For local use, the CLI stores keys through the operating system credential store using `Bun.secrets`. Headless MCP hosts may pass keys directly to the child process environment. Profile metadata never contains key values.
 
 Access tokens contain encrypted project keys because the current 2328 API authenticates with long-lived HMAC secrets. They are never persisted by this service. Protect the hosted endpoint with TLS, prevent access-token logging at every proxy layer and keep the default 15-minute TTL.
 

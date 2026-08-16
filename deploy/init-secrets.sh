@@ -26,6 +26,8 @@ redis_password=$(openssl rand -hex 32)
 printf '%s\n' "$token_encryption_key" > "$secrets_directory/token_encryption_key"
 printf '%s\n' "$redis_password" > "$secrets_directory/redis_password"
 printf 'user default off\nuser mcp on >%s ~mcp2328:* +auth +hello +select +ping +set +incr +expire +eval\n' "$redis_password" > "$secrets_directory/redis.acl"
-chmod 600 "$secrets_directory/token_encryption_key" "$secrets_directory/redis_password" "$secrets_directory/redis.acl"
+# Compose file-backed secrets preserve host ownership and mode on Linux. The
+# root-only directory protects them on the host; read-only containers need read access.
+chmod 444 "$secrets_directory/token_encryption_key" "$secrets_directory/redis_password" "$secrets_directory/redis.acl"
 
 echo "Created production secrets in $secrets_directory"

@@ -36,7 +36,7 @@ chmod 600 .env.production
 sh deploy/init-secrets.sh
 ```
 
-Back up `secrets/token_encryption_key` to the production secrets manager before starting the service. Do not copy the Redis password or token key into tickets, chat, shell arguments or Git.
+The script keeps the `secrets` directory root-only (`0700`) and makes its files read-only (`0444`). This is intentional: Docker Compose implements file-backed secrets as bind mounts on Linux and cannot remap their ownership for the non-root MCP and Redis users. Back up `secrets/token_encryption_key` to the production secrets manager before starting the service. Do not copy the Redis password or token key into tickets, chat, shell arguments or Git.
 
 Validate and start the stack:
 
