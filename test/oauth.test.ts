@@ -51,7 +51,11 @@ describe("OAuth Authorization Code with PKCE", () => {
     expect(consent.status).toBe(200);
     const page = await consent.text();
     expect(page).toContain("Payout API key");
-    expect(page).toContain("запрошены права на движение средств");
+    expect(page).toContain("Доступ включает операции со средствами");
+    expect(page).toContain("Подключаем…");
+    const nonce = /<script nonce="([^"]+)">/u.exec(page)?.[1];
+    if (!nonce) throw new Error("Authorization page CSP nonce is missing");
+    expect(consent.headers.get("content-security-policy")).toContain(`script-src 'nonce-${nonce}'`);
     const requestToken = /name="request_token" value="([^"]+)"/u.exec(page)?.[1];
     expect(requestToken).toBeTruthy();
 
@@ -62,8 +66,11 @@ describe("OAuth Authorization Code with PKCE", () => {
       payout_api_key: "b".repeat(32),
       consent: "yes",
     }), "127.0.0.1");
-    expect(approval.status).toBe(302);
+    expect(approval.status).toBe(303);
     const callback = new URL(approval.headers.get("location")!);
+    expect(callback.origin).toBe("https://client.example");
+    expect(callback.pathname).toBe("/callback");
+    expect(callback.searchParams.get("code")).toBeTruthy();
     expect(callback.searchParams.get("state")).toBe("opaque-client-state");
 
     const tokenValues = {

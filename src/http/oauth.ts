@@ -1,4 +1,5 @@
 import type { Config } from "../config.js";
+import { randomBytes } from "node:crypto";
 import { publicMcpUrl } from "../config.js";
 import { SCOPES, parseScopes } from "../domain.js";
 import type { Logger } from "../logger.js";
@@ -8,18 +9,18 @@ import type { TokenService } from "../security/tokens.js";
 import { json, oauthError, readForm, SECURITY_HEADERS } from "./responses.js";
 
 const SCOPE_DESCRIPTIONS: Record<string, string> = {
-  "wallet:read": "Просмотр балансов и доступных направлений",
-  "market:read": "Просмотр публичных курсов и цен",
-  "invoice:read": "Просмотр счетов и их статусов",
-  "invoice:create": "Создание новых счетов",
-  "static-wallet:read": "Просмотр постоянных кошельков и поступлений",
+  "wallet:read": "Балансы и направления",
+  "market:read": "Курсы и цены",
+  "invoice:read": "Счета и их статусы",
+  "invoice:create": "Создание счетов",
+  "static-wallet:read": "Постоянные кошельки и поступления",
   "static-wallet:create": "Создание постоянных кошельков",
-  "static-wallet:update": "Включение и отключение постоянных кошельков",
-  "payout:read": "Просмотр статуса выплат",
-  "payout:quote": "Расчёт суммы и комиссии выплаты без отправки",
+  "static-wallet:update": "Управление постоянными кошельками",
+  "payout:read": "Статусы выплат",
+  "payout:quote": "Расчёт суммы и комиссии выплаты",
   "payout:create": "Отправка средств на блокчейн-адрес",
-  "convert:quote": "Расчёт конвертации без движения средств",
-  "convert:execute": "Конвертация средств на балансе",
+  "convert:quote": "Расчёт конвертации",
+  "convert:execute": "Конвертация средств",
 };
 
 function validRedirectUri(value: string): boolean {
@@ -32,36 +33,49 @@ function validRedirectUri(value: string): boolean {
   }
 }
 
-function redirectWith(urlValue: string, values: Record<string, string | undefined>): Response {
+function redirectWith(
+  urlValue: string,
+  values: Record<string, string | undefined>,
+  status: 302 | 303 = 302,
+): Response {
   const url = new URL(urlValue);
   for (const [key, value] of Object.entries(values)) if (value !== undefined) url.searchParams.set(key, value);
-  return Response.redirect(url, 302);
+  return Response.redirect(url, status);
 }
 
 function authorizationPage(requestToken: string, scopes: readonly string[], error?: string): Response {
+  const nonce = randomBytes(18).toString("base64");
   const moneyMoving = new Set(["payout:create", "convert:execute"]);
-  const scopeItems = scopes.map((scope) => `<li${moneyMoving.has(scope) ? ' class="danger"' : ""}><code>${Bun.escapeHTML(scope)}</code><span>${Bun.escapeHTML(SCOPE_DESCRIPTIONS[scope] ?? scope)}</span></li>`).join("");
-  const errorBlock = error ? `<p class="error">${Bun.escapeHTML(error)}</p>` : "";
+  const scopeItems = scopes.map((scope) => `<li class="permission${moneyMoving.has(scope) ? " permission--money" : ""}"><span class="permission-mark" aria-hidden="true">✓</span><span>${Bun.escapeHTML(SCOPE_DESCRIPTIONS[scope] ?? scope)}</span></li>`).join("");
+  const errorBlock = error ? `<div class="error" role="alert">${Bun.escapeHTML(error)}</div>` : "";
   const payoutField = scopes.some((scope) => scope.startsWith("payout:"))
-    ? '<label for="payout_api_key">Payout API key <span class="muted">(отдельный ключ выплат)</span></label><input id="payout_api_key" name="payout_api_key" type="password" minlength="16" maxlength="512">'
+    ? '<div class="field"><label for="payout_api_key">Payout API key <span>(отдельный ключ)</span></label><input id="payout_api_key" name="payout_api_key" type="password" required minlength="16" maxlength="512" autocomplete="off"></div>'
     : "";
   const moneyWarning = scopes.some((scope) => moneyMoving.has(scope))
-    ? '<p class="warning"><strong>Внимание:</strong> запрошены права на движение средств. MCP-клиент сможет выполнять их только через отдельный шаг подтверждения.</p>'
+    ? '<div class="notice"><span class="notice-mark" aria-hidden="true">!</span><p>Доступ включает операции со средствами. Каждая выплата требует отдельного подтверждения.</p></div>'
     : "";
   const body = `<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Подключить 2328 к MCP</title><style>
-body{font:16px system-ui;background:#0d1117;color:#e6edf3;margin:0;padding:32px}main{max-width:620px;margin:auto;background:#161b22;border:1px solid #30363d;border-radius:12px;padding:28px}label{display:block;margin:16px 0 6px}input{box-sizing:border-box;width:100%;padding:11px;border:1px solid #484f58;border-radius:7px;background:#0d1117;color:#e6edf3}button{margin-top:22px;padding:11px 18px;border:0;border-radius:7px;background:#238636;color:white;font-weight:600}.muted{color:#8b949e}.error{color:#ff7b72}.warning{padding:12px;border:1px solid #d29922;border-radius:7px;background:#2d2205}.danger{color:#ffb4a9}li{margin:8px 0}li span{display:block;color:#b1bac4;margin-top:2px}code{color:#79c0ff}</style></head>
-<body><main><h1>Подключение аккаунта 2328</h1><p>Укажите ключи проекта из кабинета 2328. Пароль аккаунта этому серверу не передаётся.</p>${errorBlock}
-<p>Запрашиваемые права:</p><ul>${scopeItems}</ul>${moneyWarning}
-<form method="post" autocomplete="off"><input type="hidden" name="request_token" value="${Bun.escapeHTML(requestToken)}">
-<label for="project_id">Project UUID</label><input id="project_id" name="project_id" required minlength="8" maxlength="128" spellcheck="false">
-<label for="api_key">API key</label><input id="api_key" name="api_key" type="password" required minlength="16" maxlength="512">
+<title>Подключить 2328</title><style>
+:root{color-scheme:dark;--bg:#121214;--surface:#19191c;--surface-soft:#202024;--text:#f7f7f8;--muted:#a3a3ad;--border:#323238;--accent:#f4512f;--accent-soft:#ffaf6e;--danger:#ff7864;--shadow:0 32px 100px rgba(0,0,0,.42)}*{box-sizing:border-box}html{min-height:100%;background:var(--bg)}body{min-height:100vh;margin:0;color:var(--text);background:radial-gradient(circle at 50% 18%,rgba(241,73,43,.11),transparent 34rem),var(--bg);font-family:Geist,"Segoe UI",sans-serif;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}body:before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:48px 48px;mask-image:linear-gradient(to bottom,black,transparent 65%)}.shell{position:relative;width:min(100% - 32px,640px);margin:0 auto;padding:56px 0}.brand{display:inline-flex;align-items:center;gap:12px;margin:0 0 26px;color:var(--text);font-size:27px;font-weight:650;letter-spacing:-1.5px;text-decoration:none}.brand-mark{position:relative;width:31px;height:31px}.brand-mark:before,.brand-mark:after{content:"";position:absolute;width:19px;height:19px;border:5px solid;border-radius:4px}.brand-mark:before{inset:0 0 auto auto;border-color:var(--accent) var(--accent) transparent transparent;background:linear-gradient(135deg,var(--accent-soft),var(--accent))}.brand-mark:after{inset:auto auto 0 0;border-color:transparent transparent var(--text) var(--text)}.card{overflow:hidden;border:1px solid var(--border);border-radius:20px;background:rgba(25,25,28,.94);box-shadow:var(--shadow);backdrop-filter:blur(16px)}.card-accent{height:3px;background:linear-gradient(90deg,var(--accent-soft),var(--accent) 55%,transparent)}.content{padding:34px}h1{margin:0;font-size:32px;font-weight:520;line-height:1.08;letter-spacing:-1.4px}.lead{margin:10px 0 28px;color:var(--muted);font-size:16px}.section{padding-top:24px;border-top:1px solid var(--border)}.section-title{margin:0 0 14px;color:var(--muted);font-size:12px;font-weight:650;letter-spacing:.09em;text-transform:uppercase}.permissions{display:grid;gap:8px;margin:0;padding:0;list-style:none}.permission{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border-radius:10px;background:var(--surface-soft);color:#d9d9de}.permission-mark{display:grid;flex:0 0 18px;height:18px;margin-top:2px;place-items:center;border-radius:50%;background:rgba(241,73,43,.15);color:var(--accent-soft);font-size:11px;font-weight:800}.permission--money{color:var(--text)}.permission--money .permission-mark{background:var(--accent);color:white}.notice{display:flex;gap:11px;margin:14px 0 0;padding:12px 13px;border:1px solid rgba(241,73,43,.42);border-radius:11px;background:rgba(241,73,43,.08);color:#f4c8bf}.notice p{margin:0}.notice-mark{display:grid;flex:0 0 20px;height:20px;place-items:center;border-radius:50%;background:var(--accent);color:white;font-size:12px;font-weight:800}.form{display:grid;gap:17px;margin-top:26px}.field{display:grid;gap:7px}.field label{font-size:13px;font-weight:600}.field label span{color:var(--muted);font-weight:400}input{width:100%;height:48px;padding:0 14px;border:1px solid var(--border);border-radius:10px;outline:0;background:#111113;color:var(--text);font:inherit;transition:border-color .18s ease,box-shadow .18s ease,background .18s ease}input:hover{border-color:#4b4b53}input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(241,73,43,.16);background:#141416}.consent{display:flex;align-items:flex-start;gap:10px;color:#d9d9de;cursor:pointer}.consent input{flex:0 0 18px;width:18px;height:18px;margin-top:2px;accent-color:var(--accent)}button{display:flex;width:100%;height:50px;align-items:center;justify-content:center;gap:9px;border:0;border-radius:10px;background:var(--accent);color:white;font:inherit;font-weight:650;cursor:pointer;transition:transform .18s ease,background .18s ease,box-shadow .18s ease}button:hover{background:#ff5a36;box-shadow:0 12px 30px rgba(241,73,43,.22);transform:translateY(-1px)}button:active{transform:translateY(0)}button:focus-visible{outline:3px solid rgba(255,175,110,.38);outline-offset:2px}button:disabled{background:#343439;color:#8d8d95;box-shadow:none;cursor:wait;transform:none}.button-arrow{font-size:19px;font-weight:400}.submit-status{margin:0;text-align:center;color:var(--muted);font-size:13px}.error{margin:18px 0 0;padding:12px 13px;border:1px solid rgba(255,120,100,.5);border-radius:10px;background:rgba(255,120,100,.08);color:#ffc0b6}.foot{margin:18px 0 0;text-align:center;color:#6f6f78;font-size:12px}@media(max-width:560px){.shell{width:min(100% - 20px,640px);padding:20px 0 28px}.brand{margin:0 0 18px;font-size:24px}.card{border-radius:16px}.content{padding:24px 20px}h1{font-size:28px}.lead{margin-bottom:24px}.permission{padding:9px 10px}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+</style></head>
+<body><main class="shell"><a class="brand" href="https://2328.io" aria-label="2328"><span class="brand-mark" aria-hidden="true"></span><span>2328</span></a><section class="card"><div class="card-accent"></div><div class="content"><h1>Подключить 2328</h1><p class="lead">Подтвердите доступ к проекту для MCP-клиента.</p>${errorBlock}
+<div class="section"><p class="section-title">Доступ</p><ul class="permissions">${scopeItems}</ul>${moneyWarning}</div>
+<form class="form" method="post" autocomplete="off"><input type="hidden" name="request_token" value="${Bun.escapeHTML(requestToken)}">
+<div class="field"><label for="project_id">Project UUID</label><input id="project_id" name="project_id" required minlength="8" maxlength="128" spellcheck="false" autocapitalize="none" autocomplete="off"></div>
+<div class="field"><label for="api_key">API key</label><input id="api_key" name="api_key" type="password" required minlength="16" maxlength="512" autocomplete="off"></div>
 ${payoutField}
-<label><input style="width:auto" type="checkbox" name="consent" value="yes" required> Разрешаю перечисленные действия этому MCP-клиенту</label>
-<button type="submit">Подключить</button></form>
-<p class="muted">Ключи шифруются в короткоживущем access token и не сохраняются в базе MCP.</p></main></body></html>`;
-  return new Response(body, { status: error ? 400 : 200, headers: { ...SECURITY_HEADERS, "content-type": "text/html; charset=utf-8" } });
+<label class="consent"><input type="checkbox" name="consent" value="yes" required><span>Разрешить этот доступ</span></label>
+<button type="submit"><span>Подключить</span><span class="button-arrow" aria-hidden="true">→</span></button><p id="submit-status" class="submit-status" role="status" aria-live="polite" hidden>Проверяем доступ…</p></form></div></section><p class="foot">2328 MCP</p></main>
+<script nonce="${nonce}">const form=document.querySelector("form");const button=form?.querySelector('button[type="submit"]');const status=document.querySelector("#submit-status");form?.addEventListener("submit",()=>{if(button instanceof HTMLButtonElement){button.disabled=true;button.textContent="Подключаем…";button.setAttribute("aria-busy","true")}if(status instanceof HTMLElement)status.hidden=false});</script></body></html>`;
+  return new Response(body, {
+    status: error ? 400 : 200,
+    headers: {
+      ...SECURITY_HEADERS,
+      "content-security-policy": `${SECURITY_HEADERS["content-security-policy"]}; script-src 'nonce-${nonce}'`,
+      "content-type": "text/html; charset=utf-8",
+    },
+  });
 }
 
 export class OAuthHandler {
@@ -162,7 +176,7 @@ export class OAuthHandler {
       const authorization = await this.tokens.readAuthorizationRequest(form.get("request_token") ?? "");
       if (form.get("consent") !== "yes") {
         await this.store.consume("authorization-request", authorization.jti, 600);
-        return redirectWith(authorization.redirectUri, { error: "access_denied", state: authorization.state });
+        return redirectWith(authorization.redirectUri, { error: "access_denied", state: authorization.state }, 303);
       }
       const projectId = form.get("project_id")?.trim() ?? "";
       const apiKey = form.get("api_key") ?? "";
@@ -180,7 +194,7 @@ export class OAuthHandler {
       await api.balances();
       if (!await this.store.consume("authorization-request", authorization.jti, 600)) return oauthError("invalid_request", "Authorization request was already used");
       const code = await this.tokens.issueAuthorizationCode(authorization, credentials);
-      return redirectWith(authorization.redirectUri, { code, state: authorization.state });
+      return redirectWith(authorization.redirectUri, { code, state: authorization.state }, 303);
     } catch (error) {
       this.logger.warn({ error: error instanceof Error ? error.message : "unknown", ip }, "OAuth account linking failed");
       return oauthError("access_denied", "The 2328 credentials could not be verified", 401);
