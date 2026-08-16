@@ -2,5 +2,7 @@ node_modules/
 dist/
 coverage/
 .env
+.env.production
+secrets/
 *.log
 .DS_Store

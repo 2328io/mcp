@@ -1,0 +1,21 @@
+{
+	email {$ACME_EMAIL}
+}
+
+mcp.2328.io {
+	request_body {
+		max_size 1MB
+	}
+
+	reverse_proxy mcp:3000 {
+		header_up -CF-Connecting-IP
+		health_uri /readyz
+		health_interval 10s
+		health_timeout 2s
+	}
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+	}
+}

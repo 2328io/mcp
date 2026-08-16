@@ -25,14 +25,14 @@
 
 ## Secrets
 
-Use a secrets manager for `TOKEN_ENCRYPTION_KEY`, Redis credentials and TLS keys. Do not put 2328 project keys into hosted-server environment variables; users enter them during their own OAuth connection. For local use, the CLI stores keys through the operating system credential store using `Bun.secrets`. Headless MCP hosts may pass keys directly to the child process environment. Profile metadata never contains key values.
+Use a secrets manager for `TOKEN_ENCRYPTION_KEY`, Redis credentials and TLS keys. The production Compose deployment mounts the token key and Redis password as service-scoped files under `/run/secrets`; their values are not placed in Compose environment variables. Do not put 2328 project keys into hosted-server environment variables; users enter them during their own OAuth connection. For local use, the CLI stores keys through the operating system credential store using `Bun.secrets`. Headless MCP hosts may pass keys directly to the child process environment. Profile metadata never contains key values.
 
 Access tokens contain encrypted project keys because the current 2328 API authenticates with long-lived HMAC secrets. They are never persisted by this service. Protect the hosted endpoint with TLS, prevent access-token logging at every proxy layer and keep the default 15-minute TTL.
 
 ## Deployment checklist
 
 - Terminate TLS at a trusted proxy and forward only the configured host.
-- Use Redis 7.2 or newer with authentication, private networking, persistence and backups appropriate for replay state.
+- Use Redis 7.2 or newer with authentication, a command/key-limited ACL, private networking, `noeviction`, persistence and backups appropriate for replay state.
 - Set a random 32-byte `TOKEN_ENCRYPTION_KEY`; do not reuse application or JWT secrets.
 - Add the MCP egress IP to a project whitelist when 2328 IP allowlisting is enabled.
 - Apply edge rate limits in addition to the built-in per-IP limits.

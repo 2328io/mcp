@@ -35,7 +35,8 @@ From this checkout:
 ```bash
 bun install --frozen-lockfile
 bun run build
-bun link --global
+chmod +x dist/index.js # Linux/macOS
+bun link
 2328
 ```
 
@@ -80,6 +81,24 @@ If the payout key is absent, payout scopes are omitted from the local principal.
 ## Hosted Streamable HTTP
 
 The hosted mode uses OAuth Authorization Code with PKCE, short-lived encrypted access tokens and Redis replay protection.
+
+The production endpoint is `https://mcp.2328.io/mcp`. The dedicated-server deployment terminates TLS in Caddy and keeps both the MCP application and Redis off the public host network.
+
+Production deployment:
+
+```bash
+cp .env.production.example .env.production
+# Set ACME_EMAIL in .env.production.
+sh deploy/init-secrets.sh
+
+docker compose --env-file .env.production -f compose.production.yaml config
+docker compose --env-file .env.production -f compose.production.yaml build --pull
+docker compose --env-file .env.production -f compose.production.yaml up -d
+```
+
+Create an `A` record for `mcp.2328.io` before starting Caddy and allow inbound TCP `80/443` plus UDP `443`. Do not expose ports `3000` or `6379`. See [operations](docs/operations.md) for verification, upgrades and secret handling.
+
+For local hosted-mode development:
 
 ```bash
 cp .env.example .env

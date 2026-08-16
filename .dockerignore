@@ -1,5 +1,7 @@
 .git
 .env
+.env.production
+secrets
 node_modules
 dist
 coverage

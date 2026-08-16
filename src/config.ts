@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { readFileSync, statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 
 const booleanString = z
   .enum(["true", "false"])
@@ -24,7 +26,9 @@ const schema = z
     ALLOWED_ORIGINS: z.string().default(""),
     TRUST_PROXY: booleanString,
     REDIS_URL: optional(z.url()),
+    REDIS_PASSWORD_FILE: optional(z.string().min(1).max(4_096)),
     TOKEN_ENCRYPTION_KEY: optional(z.string()),
+    TOKEN_ENCRYPTION_KEY_FILE: optional(z.string().min(1).max(4_096)),
     ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().min(300).max(3_600).default(900),
     AUTH_CODE_TTL_SECONDS: z.coerce.number().int().min(30).max(300).default(120),
     PREPARATION_TTL_SECONDS: z.coerce.number().int().min(30).max(600).default(300),
@@ -50,8 +54,14 @@ const schema = z
     if (env.TRANSPORT === "http" && !env.REDIS_URL) {
       context.addIssue({ code: "custom", path: ["REDIS_URL"], message: "Redis is required for HTTP OAuth replay protection" });
     }
-    if (env.TRANSPORT === "http" && !env.TOKEN_ENCRYPTION_KEY) {
+    if (env.TOKEN_ENCRYPTION_KEY && env.TOKEN_ENCRYPTION_KEY_FILE) {
+      context.addIssue({ code: "custom", path: ["TOKEN_ENCRYPTION_KEY_FILE"], message: "Set TOKEN_ENCRYPTION_KEY or TOKEN_ENCRYPTION_KEY_FILE, not both" });
+    }
+    if (env.TRANSPORT === "http" && !env.TOKEN_ENCRYPTION_KEY && !env.TOKEN_ENCRYPTION_KEY_FILE) {
       context.addIssue({ code: "custom", path: ["TOKEN_ENCRYPTION_KEY"], message: "A 32-byte base64url key is required for HTTP OAuth" });
+    }
+    if (env.REDIS_PASSWORD_FILE && !env.REDIS_URL) {
+      context.addIssue({ code: "custom", path: ["REDIS_PASSWORD_FILE"], message: "REDIS_PASSWORD_FILE requires REDIS_URL" });
     }
     if (env.TRANSPORT === "stdio" && (!env.PROJECT_ID || !env.API_KEY)) {
       context.addIssue({ code: "custom", message: "PROJECT_ID and API_KEY are required for stdio" });
@@ -60,8 +70,29 @@ const schema = z
 
 export type Config = z.infer<typeof schema>;
 
+function readSecretFile(path: string, name: string): string {
+  if (!isAbsolute(path)) throw new Error(`${name} must be an absolute path`);
+  const metadata = statSync(path);
+  if (!metadata.isFile() || metadata.size > 4_096) throw new Error(`${name} must reference a regular file no larger than 4096 bytes`);
+  const value = readFileSync(path, "utf8").trim();
+  if (!value) throw new Error(`${name} is empty`);
+  return value;
+}
+
 export function loadConfig(input: NodeJS.ProcessEnv = process.env): Config {
-  const config = schema.parse(input);
+  let config = schema.parse(input);
+  if (config.TOKEN_ENCRYPTION_KEY_FILE) {
+    config = {
+      ...config,
+      TOKEN_ENCRYPTION_KEY: readSecretFile(config.TOKEN_ENCRYPTION_KEY_FILE, "TOKEN_ENCRYPTION_KEY_FILE"),
+    };
+  }
+  if (config.REDIS_PASSWORD_FILE && config.REDIS_URL) {
+    const redisUrl = new URL(config.REDIS_URL);
+    if (redisUrl.password) throw new Error("REDIS_URL must not contain a password when REDIS_PASSWORD_FILE is set");
+    redisUrl.password = readSecretFile(config.REDIS_PASSWORD_FILE, "REDIS_PASSWORD_FILE");
+    config = { ...config, REDIS_URL: redisUrl.toString() };
+  }
   const apiUrl = new URL(config.API_BASE_URL);
   if (config.NODE_ENV === "production" && apiUrl.protocol !== "https:") {
     throw new Error("API_BASE_URL must use HTTPS in production");

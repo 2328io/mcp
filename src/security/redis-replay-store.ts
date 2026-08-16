@@ -60,7 +60,7 @@ export class RedisReplayStore implements ReplayStore {
   private createClient(): RedisClient {
     return new RedisClient(this.url, {
       connectionTimeout: 3_000,
-      idleTimeout: 30_000,
+      idleTimeout: 0,
       enableOfflineQueue: false,
       maxRetries: 10,
     });

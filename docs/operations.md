@@ -1,5 +1,93 @@
 # Operations
 
+## Production topology
+
+The supported single-server production layout for `mcp.2328.io` is:
+
+```text
+Internet -> Caddy :443 -> MCP :3000 -> Redis :6379
+```
+
+Only Caddy publishes host ports. The MCP application is reachable from the `edge` Docker network, while Redis is isolated on the internal `state` network. Caddy removes untrusted `CF-Connecting-IP` input and supplies the canonical `X-Forwarded-For` value used by the application rate limiter.
+
+The host needs:
+
+- Ubuntu 24.04 amd64 or arm64;
+- Docker Engine with the Compose and Buildx plugins;
+- a public IPv4 address and an `A` record for `mcp.2328.io`;
+- inbound TCP `80/443`, UDP `443`, and a separately restricted SSH port;
+- outbound HTTPS access to the 2328 API, container registries and ACME certificate authorities.
+
+Do not publish Docker ports `3000` or `6379`. Docker-published ports can bypass uncomplicated host firewall rules, so validate the resulting `iptables`/`DOCKER-USER` policy as well as the cloud firewall.
+
+## First deployment
+
+Deploy a reviewed release commit rather than an unpinned branch:
+
+```bash
+git clone https://github.com/2328io/mcp.git /opt/2328-mcp
+cd /opt/2328-mcp
+git checkout <release-tag-or-commit>
+
+cp .env.production.example .env.production
+chmod 600 .env.production
+# Set a monitored ACME contact address in .env.production.
+
+sh deploy/init-secrets.sh
+```
+
+Back up `secrets/token_encryption_key` to the production secrets manager before starting the service. Do not copy the Redis password or token key into tickets, chat, shell arguments or Git.
+
+Validate and start the stack:
+
+```bash
+docker compose --env-file .env.production -f compose.production.yaml config
+docker compose --env-file .env.production -f compose.production.yaml build --pull
+docker compose --env-file .env.production -f compose.production.yaml up -d
+docker compose --env-file .env.production -f compose.production.yaml ps
+```
+
+Caddy obtains and renews the public certificate automatically after DNS resolves to the server. If a CDN is added later, explicitly configure its trusted address ranges and origin firewall before accepting its client-IP header.
+
+## Public verification
+
+```bash
+curl -fsS https://mcp.2328.io/healthz
+curl -fsS https://mcp.2328.io/readyz
+curl -fsS https://mcp.2328.io/.well-known/oauth-authorization-server
+curl -fsS https://mcp.2328.io/.well-known/oauth-protected-resource
+curl -i https://mcp.2328.io/mcp
+```
+
+The first two requests must return `200`. The unauthenticated `/mcp` request must return `401` with a `WWW-Authenticate` header pointing to the protected-resource metadata. Complete one end-to-end OAuth connection from a supported MCP client before announcing the endpoint publicly.
+
+## Upgrade and rollback
+
+Run the full repository verification in CI, then deploy a pinned release:
+
+```bash
+cd /opt/2328-mcp
+git fetch --tags --prune
+git checkout <new-release-tag-or-commit>
+docker compose --env-file .env.production -f compose.production.yaml build --pull
+docker compose --env-file .env.production -f compose.production.yaml up -d
+```
+
+Verify readiness and OAuth discovery after every update. Roll back by checking out the previous reviewed release and rebuilding. Do not rotate `TOKEN_ENCRYPTION_KEY` during an ordinary application rollback: all instances serving traffic must use the same key.
+
+The Bun, Caddy and Redis base images are pinned by multi-architecture digest. Update each version and digest together in a reviewed dependency change; do not replace the digest with a floating tag during deployment.
+
+## Backup boundary
+
+Persist and back up:
+
+- the token encryption key in the secrets manager;
+- the Redis AOF volume according to the accepted replay-state recovery point;
+- Caddy's `/data` volume or, at minimum, allow it to obtain fresh certificates during recovery;
+- the exact deployed Git commit and non-secret `.env.production` values.
+
+The hosted service does not persist user project/API keys. Never add `PROJECT_ID`, `API_KEY` or `PAYOUT_API_KEY` to the production server configuration.
+
 ## Health
 
 - `GET /healthz`: process is serving requests.
