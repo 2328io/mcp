@@ -3,6 +3,8 @@ image: oven/bun:1.3.14-alpine
 stages: [validate, build, integration]
 
 default:
+  tags:
+    - kubernetes
   cache:
     key:
       files: [bun.lock]
